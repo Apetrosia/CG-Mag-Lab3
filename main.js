@@ -1,273 +1,357 @@
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl2");
 
-if (!gl) {
-    alert("WebGL2 not supported");
-}
+if (!gl) alert("WebGL2 not supported");
 
-function resizeCanvas() {
-    canvas.height = window.innerHeight;
+function resizeCanvas(){
     canvas.width = window.innerWidth;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    canvas.height = window.innerHeight;
+    gl.viewport(0,0,canvas.width,canvas.height);
 }
 
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize",resizeCanvas);
 resizeCanvas();
 
-// ================== ПОВОРОТ ==================
+gl.enable(gl.DEPTH_TEST);
 
-let anglex = 0
-let angley = 0
-let anglez = 0
-let scalex = 1
-let scaley = 1
-let scalez = 1
-let tx = 0
-let ty = 0
-let tz = 0
+let anglex = 0;
+let angley = 0;
+let anglez = 0;
 
-function createTransformMatrix(
-    angleX = 0,
-    angleY = 0,
-    angleZ = 0,
-    scalex = 1,
-    scaley = 1,
-    scalez = 1,
-    tx = 0,
-    ty = 0,
-    tz = 0
-) {
+let scalex = 1;
+let scaley = 1;
+let scalez = 1;
 
-    const cx = Math.cos(angleX);
-    const sx = Math.sin(angleX);
+function createTransformMatrix(ax,ay,az,sx,sy,sz,tx,ty,tz){
 
-    const cy = Math.cos(angleY);
-    const sy = Math.sin(angleY);
+    const cx=Math.cos(ax), sx_=Math.sin(ax);
+    const cy=Math.cos(ay), sy_=Math.sin(ay);
+    const cz=Math.cos(az), sz_=Math.sin(az);
 
-    const cz = Math.cos(angleZ);
-    const sz = Math.sin(angleZ);
+    const rx=[
+        1,0,0,0,
+        0,cx,sx_,0,
+        0,-sx_,cx,0,
+        0,0,0,1
+    ];
 
-    // Rotation X
-    const rx = new Float32Array([
-        1, 0, 0, 0,
-        0, cx, sx, 0,
-        0, -sx, cx, 0,
-        0, 0, 0, 1
-    ]);
+    const ry=[
+        cy,0,-sy_,0,
+        0,1,0,0,
+        sy_,0,cy,0,
+        0,0,0,1
+    ];
 
-    // Rotation Y
-    const ry = new Float32Array([
-        cy, 0, -sy, 0,
-        0, 1, 0, 0,
-        sy, 0, cy, 0,
-        0, 0, 0, 1
-    ]);
+    const rz=[
+        cz,sz_,0,0,
+        -sz_,cz,0,0,
+        0,0,1,0,
+        0,0,0,1
+    ];
 
-    // Rotation Z
-    const rz = new Float32Array([
-        cz, sz, 0, 0,
-        -sz, cz, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    ]);
+    const s=[
+        sx,0,0,0,
+        0,sy,0,0,
+        0,0,sz,0,
+        0,0,0,1
+    ];
 
-    // Scale
-    const s = new Float32Array([
-        scalex, 0, 0, 0,
-        0, scaley, 0, 0,
-        0, 0, scalez, 0,
-        0, 0, 0, 1
-    ]);
+    function mul(a,b){
 
-    function multiply(a, b) {
-        const out = new Float32Array(16);
+        const r=new Float32Array(16);
 
-        for (let col = 0; col < 4; col++) {
-            for (let row = 0; row < 4; row++) {
-                out[col * 4 + row] =
-                    a[0 * 4 + row] * b[col * 4 + 0] +
-                    a[1 * 4 + row] * b[col * 4 + 1] +
-                    a[2 * 4 + row] * b[col * 4 + 2] +
-                    a[3 * 4 + row] * b[col * 4 + 3];
-            }
+        for(let c=0;c<4;c++)
+        for(let r0=0;r0<4;r0++){
+
+            r[c*4+r0]=
+            a[0*4+r0]*b[c*4+0]+
+            a[1*4+r0]*b[c*4+1]+
+            a[2*4+r0]*b[c*4+2]+
+            a[3*4+r0]*b[c*4+3];
         }
 
-        return out;
+        return r;
     }
 
-    // R = Rz * Ry * Rx
-    const rxy = multiply(ry, rx);
-    const rxyz = multiply(rz, rxy);
+    let m=mul(rz,mul(ry,rx));
+    m=mul(m,s);
 
-    // RS = R * S
-    const rs = multiply(rxyz, s);
+    m[12]=tx;
+    m[13]=ty;
+    m[14]=tz;
+    m[15]=1;
 
-    // Добавляем трансляцию (последний столбец)
-    rs[12] = tx;
-    rs[13] = ty;
-    rs[14] = tz;
-    rs[15] = 1;
-
-    return rs;
+    return m;
 }
 
-function createPerspectiveMatrix(fov, aspect, near, far) {
-    const f = 1.0 / Math.tan(fov / 2);
-    const nf = 1 / (near - far);
+function createPerspectiveMatrix(fov,aspect,near,far){
+
+    const f=1/Math.tan(fov/2);
+    const nf=1/(near-far);
 
     return new Float32Array([
-        f / aspect, 0, 0, 0,
-        0, f, 0, 0,
-        0, 0, (far + near) * nf, -1,
-        0, 0, (2 * far * near) * nf, 0
+        f/aspect,0,0,0,
+        0,f,0,0,
+        0,0,(far+near)*nf,-1,
+        0,0,(2*far*near)*nf,0
     ]);
 }
 
-// ================== ШЕЙДЕРЫ ==================
-
-const vsSource = `#version 300 es
+const vs=`#version 300 es
 in vec3 aPosition;
-in vec3 aColor;
+in vec3 aNormal;
+in vec2 aTexCoord;
 
 uniform mat4 uModel;
 uniform mat4 uProjection;
 
-out vec3 vColor;
+out vec3 vNormal;
 
-void main() {
-    gl_Position = uProjection * uModel * vec4(aPosition, 1.0);
-    vColor = aColor;
+void main(){
+
+    gl_Position=uProjection*uModel*vec4(aPosition,1.0);
+    vNormal=mat3(uModel)*aNormal;
 }
 `;
 
-const fsSource = `#version 300 es
+const fs=`#version 300 es
 precision mediump float;
 
-in vec3 vColor;
+in vec3 vNormal;
 out vec4 outColor;
 
-void main() {
-    outColor = vec4(vColor, 1.0);
+void main(){
+
+    vec3 n=normalize(vNormal);
+    outColor = vec4(1,0,0,1);
 }
 `;
 
-function createShader(gl, type, source) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
+function createShader(type,src){
 
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error(gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-    }
+    const s=gl.createShader(type);
+    gl.shaderSource(s,src);
+    gl.compileShader(s);
 
-    return shader;
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
+        console.error(gl.getShaderInfoLog(s));
+
+    return s;
 }
 
-const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
-const program = gl.createProgram();
-gl.attachShader(program, vertexShader);
-gl.attachShader(program, fragmentShader);
+const program=gl.createProgram();
+gl.attachShader(program,createShader(gl.VERTEX_SHADER,vs));
+gl.attachShader(program,createShader(gl.FRAGMENT_SHADER,fs));
 gl.linkProgram(program);
-
-if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.error(gl.getProgramInfoLog(program));
-}
 
 gl.useProgram(program);
 
-// ================== ГЕОМЕТРИЯ ==================
+const modelLoc=gl.getUniformLocation(program,"uModel");
+const projLoc=gl.getUniformLocation(program,"uProjection");
 
-const vertices = new Float32Array([
-  -0.5,-0.5, 0.5,   1,0,0,
-   0.5,-0.5, 0.5,   0,1,0,
-   0.5, 0.5, 0.5,   0,0,1,
-  -0.5, 0.5, 0.5,   1,1,0,
+async function loadOBJ(url){
 
-  -0.5,-0.5,-0.5,   1,0,1,
-   0.5,-0.5,-0.5,   0,1,1,
-   0.5, 0.5,-0.5,   1,1,1,
-  -0.5, 0.5,-0.5,   0,0,0,
-]);
+    const res=await fetch(url);
+    const text=await res.text();
 
-const indices = new Uint16Array([
-  0,1,2, 0,2,3,
-  4,5,6, 4,6,7,
-  0,1,5, 0,5,4,
-  2,3,7, 2,7,6,
-  1,2,6, 1,6,5,
-  0,3,7, 0,7,4
-]);
+    const lines=text.split("\n");
 
-const vao = gl.createVertexArray();
-gl.bindVertexArray(vao);
+    const pos=[];
+    const nor=[];
+    const uv=[];
 
-const vbo = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    const vertices=[];
+    const indices=[];
+    const map=new Map();
 
-const ebo = gl.createBuffer();
-gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    function getIndex(v,vt,vn){
 
-const posLoc = gl.getAttribLocation(program, "aPosition");
-const colorLoc = gl.getAttribLocation(program, "aColor");
+        const key=`${v}/${vt}/${vn}`;
+        if(map.has(key)) return map.get(key);
 
-gl.enableVertexAttribArray(posLoc);
-gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 6 * 4, 0);
+        const px=pos[v*3];
+        const py=pos[v*3+1];
+        const pz=pos[v*3+2];
 
-gl.enableVertexAttribArray(colorLoc);
-gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 6 * 4, 3 * 4);
+        let nx = 0, ny = 0, nz = 1;
 
-document.addEventListener("keydown", (e) => {
-    if (e.key === "w" || e.key === "W") anglex += 0.02;
-    if (e.key === "s" || e.key === "S") anglex -= 0.02;
-    if (e.key === "d" || e.key === "D") angley += 0.02;
-    if (e.key === "a" || e.key === "A") angley -= 0.02;
-    if (e.key === "q" || e.key === "Q") anglez += 0.02;
-    if (e.key === "e" || e.key === "E") anglez -= 0.02;
-    
+        if (vn >= 0) {
+            nx = nor[vn*3];
+            ny = nor[vn*3+1];
+            nz = nor[vn*3+2];
+        }
+
+        const u=vt>=0?uv[vt*2]:0;
+        const vcoord=vt>=0?uv[vt*2+1]:0;
+
+        vertices.push(px,py,pz,nx,ny,nz,u,vcoord);
+
+        const id=vertices.length/8-1;
+        map.set(key,id);
+
+        return id;
+    }
+
+    for(let l of lines){
+
+        l=l.trim();
+        if(l==""||l.startsWith("#")) continue;
+
+        const p=l.split(/\s+/);
+
+        if(p[0]=="v")
+            pos.push(+p[1],+p[2],+p[3]);
+
+        else if(p[0]=="vn")
+            nor.push(+p[1],+p[2],+p[3]);
+
+        else if(p[0]=="vt")
+            uv.push(+p[1],+p[2]);
+
+        else if(p[0]=="f"){
+
+            const face=[];
+
+            for(let i=1;i<p.length;i++){
+
+                const t=p[i].split("/");
+                const v=parseInt(t[0])-1;
+                const vt=t[1]?parseInt(t[1])-1:-1;
+                const vn=t[2]?parseInt(t[2])-1:-1;
+
+                face.push(getIndex(v,vt,vn));
+            }
+
+            for(let i=1;i<face.length-1;i++)
+                indices.push(face[0],face[i],face[i+1]);
+        }
+    }
+
+    return{
+        vertices:new Float32Array(vertices),
+        indices:new Uint32Array(indices)
+    };
+}
+
+function createMesh(data){
+
+    const vao=gl.createVertexArray();
+    gl.bindVertexArray(vao);
+
+    const vbo=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+    gl.bufferData(gl.ARRAY_BUFFER,data.vertices,gl.STATIC_DRAW);
+
+    const ebo=gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ebo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,data.indices,gl.STATIC_DRAW);
+
+    const stride=8*4;
+
+    const posLoc=gl.getAttribLocation(program,"aPosition");
+    const normLoc=gl.getAttribLocation(program,"aNormal");
+    const uvLoc=gl.getAttribLocation(program,"aTexCoord");
+
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc,3,gl.FLOAT,false,stride,0);
+
+    gl.enableVertexAttribArray(normLoc);
+    gl.vertexAttribPointer(normLoc,3,gl.FLOAT,false,stride,3*4);
+
+    gl.enableVertexAttribArray(uvLoc);
+    gl.vertexAttribPointer(uvLoc,2,gl.FLOAT,false,stride,6*4);
+
+    return{
+        vao:vao,
+        count:data.indices.length
+    };
+}
+
+let objects = [];
+
+async function init(){
+
+    const snowman = await loadOBJ("./models/snowman.obj");
+    const GrumpyCat = await loadOBJ("./models/GrumpyCat.obj");
+    const bananaCat = await loadOBJ("./models/bananaCat.obj");
+
+    objects.push({
+        mesh: createMesh(snowman),
+        tx: 0,
+        ty: -0.3,
+        tz: -5,
+        scale: 0.3
+    });
+
+    objects.push({
+        mesh: createMesh(GrumpyCat),
+        tx: -1.5,
+        ty: -0.3,
+        tz: -5,
+        scale: 0.6
+    });
+
+    objects.push({
+        mesh: createMesh(bananaCat),
+        tx: 2,
+        ty: -0.7,
+        tz: -7,
+        scale: 0.5
+    });
+
+    requestAnimationFrame(render);
+}
+
+document.addEventListener("keydown",(e)=>{
+
+    if(e.key=="w") anglex+=0.05;
+    if(e.key=="s") anglex-=0.05;
+    if(e.key=="a") angley-=0.05;
+    if(e.key=="d") angley+=0.05;
 });
 
-const rotationLoc = gl.getUniformLocation(program, "uRotation");
-const modelLoc = gl.getUniformLocation(program, "uModel");
-const projectionLoc = gl.getUniformLocation(program, "uProjection");
+function render(){
 
-gl.enable(gl.DEPTH_TEST);
-
-// ================== РЕНДЕР ==================
-
-function render() {
     gl.clearColor(0,0,0,1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
 
-    const aspect = canvas.width / canvas.height;
+    const aspect=canvas.width/canvas.height;
 
-    const projection = createPerspectiveMatrix(
-        Math.PI / 4,  // 45°
+    const projection=createPerspectiveMatrix(
+        Math.PI/4,
         aspect,
         0.1,
         100
     );
 
+    gl.uniformMatrix4fv(projLoc,false,projection);
+
+    for (const obj of objects) {
+
     const model = createTransformMatrix(
         anglex,
         angley,
         anglez,
-        scalex,
-        scaley,
-        scalez,
-        0, 0, -4   // ← ВАЖНО! Отодвигаем куб назад
+        obj.scale,
+        obj.scale,
+        obj.scale,
+        obj.tx,
+        obj.ty,
+        obj.tz
     );
 
-    gl.uniformMatrix4fv(modelLoc, false, model);
-    gl.uniformMatrix4fv(projectionLoc, false, projection);
+    gl.uniformMatrix4fv(modelLoc,false,model);
+    gl.bindVertexArray(obj.mesh.vao);
 
-    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+    gl.drawElements(
+        gl.TRIANGLES,
+        obj.mesh.count,
+        gl.UNSIGNED_INT,
+        0
+    );
+}
 
     requestAnimationFrame(render);
 }
 
-render();
+init();

@@ -1,0 +1,25 @@
+{
+  "name": "cg-mag-lab3",
+  "version": "1.0.0",
+  "description": "Поместить на сцену снеговика из сфер (создать в блендере). Дополнительно разместить еще две готовые модели (взять из интернета), пока без загрузки текстур.",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "serve"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Apetrosia/CG-Mag-Lab3.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Apetrosia/CG-Mag-Lab3/issues"
+  },
+  "homepage": "https://github.com/Apetrosia/CG-Mag-Lab3#readme",
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
+}
