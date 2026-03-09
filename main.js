@@ -100,32 +100,53 @@ function createPerspectiveMatrix(fov,aspect,near,far){
 const vs=`#version 300 es
 in vec3 aPosition;
 in vec3 aNormal;
-in vec2 aTexCoord;
 
 uniform mat4 uModel;
 uniform mat4 uProjection;
 
+out vec3 vPos;
 out vec3 vNormal;
 
 void main(){
-
-    gl_Position=uProjection*uModel*vec4(aPosition,1.0);
-    vNormal=mat3(uModel)*aNormal;
-}
-`;
+    vec4 worldPos = uModel * vec4(aPosition,1.0);
+    vPos = worldPos.xyz;
+    vNormal = normalize(mat3(uModel) * aNormal); // или transpose(inverse(uModel)) если будут неравномерные масштабы
+    gl_Position = uProjection * worldPos;
+}`;
 
 const fs=`#version 300 es
 precision mediump float;
 
+in vec3 vPos;
 in vec3 vNormal;
+
 out vec4 outColor;
 
-void main(){
+uniform vec3 uLightPos;
+uniform float uAmbientPower;
+uniform int uUsePhong; // 1 = Phong, 0 = Lambert
+uniform vec3 uBaseColor; // базовый цвет для модели
 
-    vec3 n=normalize(vNormal);
-    outColor = vec4(1,0,0,1);
-}
-`;
+void main(){
+    vec3 ambient = uAmbientPower * uBaseColor;
+    vec3 lightDir = normalize(uLightPos - vPos);
+    float diff = max(dot(vNormal, lightDir), 0.0);
+    vec3 diffuse = diff * uBaseColor;
+
+    vec3 color;
+
+    if(uUsePhong == 1){
+        vec3 viewDir = normalize(-vPos);
+        vec3 reflectDir = reflect(-lightDir,vNormal);
+        float spec = pow(max(dot(viewDir,reflectDir),0.0),32.0);
+        vec3 specular = spec * vec3(1.0);
+        color = ambient + diffuse + specular;
+    } else {
+        color = ambient + diffuse;
+    }
+
+    outColor = vec4(color,1.0);
+}`;
 
 function createShader(type,src){
 
@@ -258,8 +279,10 @@ function createMesh(data){
     gl.enableVertexAttribArray(normLoc);
     gl.vertexAttribPointer(normLoc,3,gl.FLOAT,false,stride,3*4);
 
-    gl.enableVertexAttribArray(uvLoc);
-    gl.vertexAttribPointer(uvLoc,2,gl.FLOAT,false,stride,6*4);
+    if (uvLoc >= 0) {
+        gl.enableVertexAttribArray(uvLoc);
+        gl.vertexAttribPointer(uvLoc,2,gl.FLOAT,false,stride,6*4);
+    }
 
     return{
         vao:vao,
@@ -272,7 +295,7 @@ let objects = [];
 async function init(){
 
     const snowman = await loadOBJ("./models/snowman.obj");
-    const GrumpyCat = await loadOBJ("./models/GrumpyCat.obj");
+    const Sherlock = await loadOBJ("./models/Sherlock.obj");
     const bananaCat = await loadOBJ("./models/bananaCat.obj");
 
     objects.push({
@@ -284,16 +307,16 @@ async function init(){
     });
 
     objects.push({
-        mesh: createMesh(GrumpyCat),
+        mesh: createMesh(Sherlock),
         tx: -1.5,
-        ty: -0.3,
-        tz: -5,
-        scale: 0.6
+        ty: -0.4,
+        tz: -4,
+        scale: 3
     });
 
     objects.push({
         mesh: createMesh(bananaCat),
-        tx: 2,
+        tx: 3,
         ty: -0.7,
         tz: -7,
         scale: 0.5
@@ -302,12 +325,33 @@ async function init(){
     requestAnimationFrame(render);
 }
 
-document.addEventListener("keydown",(e)=>{
+const lightLoc = gl.getUniformLocation(program,"uLightPos");
+const ambientLoc = gl.getUniformLocation(program,"uAmbientPower");
+const phongLoc = gl.getUniformLocation(program,"uUsePhong");
 
+const baseColorLoc = gl.getUniformLocation(program,"uBaseColor");
+let usePhong = 1;
+gl.uniform1i(phongLoc,usePhong);
+
+// изначальный цвет белый
+let baseColor = [1.0,1.0,1.0];
+gl.uniform3fv(baseColorLoc, baseColor);
+
+document.addEventListener("keydown",(e)=>{
     if(e.key=="w") anglex+=0.05;
     if(e.key=="s") anglex-=0.05;
     if(e.key=="a") angley-=0.05;
     if(e.key=="d") angley+=0.05;
+    if(e.key=="l" || e.key=="L") {
+        usePhong = 1 - usePhong;
+        gl.uniform1i(phongLoc,usePhong);
+
+        // случайный цвет
+        baseColor = [Math.random(), Math.random(), Math.random()];
+        gl.uniform3fv(baseColorLoc, baseColor);
+
+        console.log("Lighting mode:", usePhong ? "Phong" : "Lambert", "Color:", baseColor);
+    }
 });
 
 function render(){
