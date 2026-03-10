@@ -27,6 +27,33 @@ let ambientPower = 0.2;
 let usePhongModel = 1;
 let baseColor = [0.96, 0.46, 0.99];
 
+let attConstant = 1.0;
+let attLinear = 0.0;
+let attQuadratic = 0.0;
+
+let infoDiv = document.createElement('div');
+infoDiv.style.position = 'absolute';
+infoDiv.style.top = '10px';
+infoDiv.style.right = '10px';
+infoDiv.style.backgroundColor = 'rgba(0,0,0,0.7)';
+infoDiv.style.color = 'white';
+infoDiv.style.padding = '10px';
+infoDiv.style.borderRadius = '5px';
+infoDiv.style.fontFamily = 'monospace';
+infoDiv.style.zIndex = '100';
+document.body.appendChild(infoDiv);
+
+function updateInfo() {
+    infoDiv.innerHTML = `
+        Ambient: ${ambientPower.toFixed(2)}<br>
+        Const att: ${attConstant.toFixed(2)}<br>
+        Linear att: ${attLinear.toFixed(2)}<br>
+        Quad att: ${attQuadratic.toFixed(2)}<br>
+        Light model: ${usePhongModel ? 'Phong' : 'Lambert'}<br>
+        Shading: ${currentProgram === progPhong ? 'Phong' : 'Gouraud'}
+    `;
+}
+
 function createTransformMatrix(ax, ay, az, sx, sy, sz, tx, ty, tz) {
     const cx = Math.cos(ax), sx_ = Math.sin(ax);
     const cy = Math.cos(ay), sy_ = Math.sin(ay);
@@ -117,19 +144,29 @@ const fsPhong = `#version 300 es
     out vec4 outColor;
     uniform vec3 uLightPos;
     uniform float uAmbientPower;
-    uniform int uUsePhong;      // 1 = Phong (specular), 0 = Lambert
+    uniform int uUsePhong;
     uniform vec3 uBaseColor;
+    uniform float uAttenuationConstant;
+    uniform float uAttenuationLinear;
+    uniform float uAttenuationQuadratic;
     void main() {
         vec3 ambient = uAmbientPower * uBaseColor;
-        vec3 lightDir = normalize(uLightPos - vPos);
+
+        vec3 lightDir = uLightPos - vPos;
+        float dist = length(lightDir);
+        lightDir = normalize(lightDir);
+        float attenuation = 1.0 / (uAttenuationConstant + uAttenuationLinear * dist + uAttenuationQuadratic * dist * dist);
+
         float diff = max(dot(vNormal, lightDir), 0.0);
-        vec3 diffuse = diff * uBaseColor;
+        vec3 diffuse = diff * uBaseColor * attenuation;
         vec3 color = ambient + diffuse;
+
         if (uUsePhong == 1) {
             vec3 viewDir = normalize(-vPos);
             vec3 reflectDir = reflect(-lightDir, vNormal);
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-            color += spec; // белый спекуляр
+            spec *= attenuation;
+            color += spec;
         }
         outColor = vec4(color, 1.0);
     }`;
@@ -141,21 +178,31 @@ const vsGouraud = `#version 300 es
     uniform mat4 uProjection;
     uniform vec3 uLightPos;
     uniform float uAmbientPower;
-    uniform int uUsePhong;      // 1 = Phong (specular), 0 = Lambert
+    uniform int uUsePhong;
     uniform vec3 uBaseColor;
+    uniform float uAttenuationConstant;
+    uniform float uAttenuationLinear;
+    uniform float uAttenuationQuadratic;
     out vec3 vColor;
     void main() {
         vec4 worldPos = uModel * vec4(aPosition, 1.0);
         vec3 normal = normalize(mat3(uModel) * aNormal);
-        vec3 lightDir = normalize(uLightPos - worldPos.xyz);
+
+        vec3 lightDir = uLightPos - worldPos.xyz;
+        float dist = length(lightDir);
+        lightDir = normalize(lightDir);
+        float attenuation = 1.0 / (uAttenuationConstant + uAttenuationLinear * dist + uAttenuationQuadratic * dist * dist);
+
         float diff = max(dot(normal, lightDir), 0.0);
         vec3 ambient = uAmbientPower * uBaseColor;
-        vec3 diffuse = diff * uBaseColor;
+        vec3 diffuse = diff * uBaseColor * attenuation;
         vec3 color = ambient + diffuse;
+
         if (uUsePhong == 1) {
-            vec3 viewDir = normalize(-worldPos.xyz); // камера в начале координат
+            vec3 viewDir = normalize(-worldPos.xyz);
             vec3 reflectDir = reflect(-lightDir, normal);
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+            spec *= attenuation;
             color += spec;
         }
         vColor = color;
@@ -204,7 +251,10 @@ const phongUniforms = {
     lightPos: gl.getUniformLocation(progPhong, "uLightPos"),
     ambientPower: gl.getUniformLocation(progPhong, "uAmbientPower"),
     usePhong: gl.getUniformLocation(progPhong, "uUsePhong"),
-    baseColor: gl.getUniformLocation(progPhong, "uBaseColor")
+    baseColor: gl.getUniformLocation(progPhong, "uBaseColor"),
+    attConst: gl.getUniformLocation(progPhong, "uAttenuationConstant"),
+    attLin: gl.getUniformLocation(progPhong, "uAttenuationLinear"),
+    attQuad: gl.getUniformLocation(progPhong, "uAttenuationQuadratic")
 };
 
 const gouraudUniforms = {
@@ -213,25 +263,31 @@ const gouraudUniforms = {
     lightPos: gl.getUniformLocation(progGouraud, "uLightPos"),
     ambientPower: gl.getUniformLocation(progGouraud, "uAmbientPower"),
     usePhong: gl.getUniformLocation(progGouraud, "uUsePhong"),
-    baseColor: gl.getUniformLocation(progGouraud, "uBaseColor")
+    baseColor: gl.getUniformLocation(progGouraud, "uBaseColor"),
+    attConst: gl.getUniformLocation(progGouraud, "uAttenuationConstant"),
+    attLin: gl.getUniformLocation(progGouraud, "uAttenuationLinear"),
+    attQuad: gl.getUniformLocation(progGouraud, "uAttenuationQuadratic")
 };
 
 let currentProgram = progPhong;
 let currentUniforms = phongUniforms;
 gl.useProgram(currentProgram);
 
-function setLightAndColor(prog, uniforms) {
+function setUniforms(prog, uniforms) {
     gl.useProgram(prog);
     gl.uniform3fv(uniforms.lightPos, lightPos);
     gl.uniform1f(uniforms.ambientPower, ambientPower);
     gl.uniform1i(uniforms.usePhong, usePhongModel);
     gl.uniform3fv(uniforms.baseColor, baseColor);
+    gl.uniform1f(uniforms.attConst, attConstant);
+    gl.uniform1f(uniforms.attLin, attLinear);
+    gl.uniform1f(uniforms.attQuad, attQuadratic);
 }
 
-setLightAndColor(progPhong, phongUniforms);
-setLightAndColor(progGouraud, gouraudUniforms);
-
+setUniforms(progPhong, phongUniforms);
+setUniforms(progGouraud, gouraudUniforms);
 gl.useProgram(currentProgram);
+updateInfo();
 
 async function loadOBJ(url) {
     const res = await fetch(url);
@@ -369,23 +425,29 @@ async function init() {
 }
 
 document.addEventListener("keydown", (e) => {
-    // Переключение модели света (Lambert / Phong) и случайный цвет
+    // Регулировка ambient (как было)
     if (e.key == "+" || e.key == "=") {
-        ambientPower += 0.02
-        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
+        ambientPower = Math.min(1, ambientPower + 0.02);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
     }
-
     if (e.key == "-") {
-        ambientPower -= 0.02
-        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
+        ambientPower = Math.max(0, ambientPower - 0.02);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
     }
 
+    // Переключение модели света (Lambert/Phong specular)
     if (e.key == "l" || e.key == "L") {
         usePhongModel = 1 - usePhongModel;
-        //baseColor = [Math.random(), Math.random(), Math.random()];
-        gl.uniform1i(currentUniforms.usePhong, usePhongModel);
-        gl.uniform3fv(currentUniforms.baseColor, baseColor);
-        console.log("Light model:", usePhongModel ? "Phong" : "Lambert", "Color:", baseColor);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
     }
 
     // Переключение shading: Gouraud / Phong
@@ -393,21 +455,47 @@ document.addEventListener("keydown", (e) => {
         currentProgram = progGouraud;
         currentUniforms = gouraudUniforms;
         gl.useProgram(currentProgram);
-        gl.uniform3fv(currentUniforms.lightPos, lightPos);
-        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
-        gl.uniform1i(currentUniforms.usePhong, usePhongModel);
-        gl.uniform3fv(currentUniforms.baseColor, baseColor);
-        console.log("Shading: Gouraud", baseColor);
+        setUniforms(currentProgram, currentUniforms);
+        updateInfo();
     }
     if (e.key == "p" || e.key == "P") {
         currentProgram = progPhong;
         currentUniforms = phongUniforms;
         gl.useProgram(currentProgram);
-        gl.uniform3fv(currentUniforms.lightPos, lightPos);
-        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
-        gl.uniform1i(currentUniforms.usePhong, usePhongModel);
-        gl.uniform3fv(currentUniforms.baseColor, baseColor);
-        console.log("Shading: Phong", baseColor);
+        setUniforms(currentProgram, currentUniforms);
+        updateInfo();
+    }
+
+    // Линейное затухание
+    if (e.key == "i") {
+        attLinear = Math.min(1, attLinear + 0.01);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
+    }
+    if (e.key == "I") {
+        attLinear = Math.max(0, attLinear - 0.01);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
+    }
+
+    // Квадратичное затухание
+    if (e.key == "o") {
+        attQuadratic = Math.min(1, attQuadratic + 0.01);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
+    }
+    if (e.key == "O") {
+        attQuadratic = Math.max(0, attQuadratic - 0.01);
+        setUniforms(progPhong, phongUniforms);
+        setUniforms(progGouraud, gouraudUniforms);
+        gl.useProgram(currentProgram);
+        updateInfo();
     }
 });
 
@@ -417,12 +505,7 @@ function render() {
 
     const aspect = canvas.width / canvas.height;
     const projection = createPerspectiveMatrix(Math.PI / 4, aspect, 0.1, 100);
-
     gl.uniformMatrix4fv(currentUniforms.projection, false, projection);
-    gl.uniform3fv(currentUniforms.lightPos, lightPos);
-    gl.uniform1f(currentUniforms.ambientPower, ambientPower);
-    gl.uniform1i(currentUniforms.usePhong, usePhongModel);
-    gl.uniform3fv(currentUniforms.baseColor, baseColor);
 
     for (const obj of objects) {
         const model = createTransformMatrix(
@@ -430,7 +513,6 @@ function render() {
             obj.scale, obj.scale, obj.scale,
             obj.tx, obj.ty, obj.tz
         );
-
         gl.uniformMatrix4fv(currentUniforms.model, false, model);
         gl.bindVertexArray(obj.mesh.vao);
         gl.drawElements(gl.TRIANGLES, obj.mesh.count, gl.UNSIGNED_INT, 0);
