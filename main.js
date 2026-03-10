@@ -22,10 +22,9 @@ let scalex = 1;
 let scaley = 1;
 let scalez = 1;
 
-// Параметры освещения
 let lightPos = [5.0, 5.0, 5.0];
 let ambientPower = 0.2;
-let usePhongModel = 1;          // 1 = Phong (со spécula), 0 = Lambert
+let usePhongModel = 1;
 let baseColor = [0.96, 0.46, 0.99];
 
 function createTransformMatrix(ax, ay, az, sx, sy, sz, tx, ty, tz) {
@@ -97,7 +96,6 @@ function createPerspectiveMatrix(fov, aspect, near, far) {
     ]);
 }
 
-// ---- Шейдеры для Phong shading (попиксельное освещение) ----
 const vsPhong = `#version 300 es
     in vec3 aPosition;
     in vec3 aNormal;
@@ -136,7 +134,6 @@ const fsPhong = `#version 300 es
         outColor = vec4(color, 1.0);
     }`;
 
-// ---- Шейдеры для Gouraud shading (вершинное освещение) ----
 const vsGouraud = `#version 300 es
     in vec3 aPosition;
     in vec3 aNormal;
@@ -196,14 +193,11 @@ function createProgramWithBindings(vsSrc, fsSrc, bindings) {
     return prog;
 }
 
-// Привязываем атрибуты к фиксированным индексам (для совместимости VAO)
 const attribBindings = { aPosition: 0, aNormal: 1, aTexCoord: 2 };
 
-// Создаём две программы
 const progPhong = createProgramWithBindings(vsPhong, fsPhong, attribBindings);
 const progGouraud = createProgramWithBindings(vsGouraud, fsGouraud, attribBindings);
 
-// Получаем uniform locations для каждой программы
 const phongUniforms = {
     model: gl.getUniformLocation(progPhong, "uModel"),
     projection: gl.getUniformLocation(progPhong, "uProjection"),
@@ -222,12 +216,10 @@ const gouraudUniforms = {
     baseColor: gl.getUniformLocation(progGouraud, "uBaseColor")
 };
 
-// Текущая активная программа (по умолчанию Phong)
 let currentProgram = progPhong;
 let currentUniforms = phongUniforms;
 gl.useProgram(currentProgram);
 
-// Устанавливаем начальные значения uniform'ов для обеих программ
 function setLightAndColor(prog, uniforms) {
     gl.useProgram(prog);
     gl.uniform3fv(uniforms.lightPos, lightPos);
@@ -236,14 +228,11 @@ function setLightAndColor(prog, uniforms) {
     gl.uniform3fv(uniforms.baseColor, baseColor);
 }
 
-// Установим для обеих программ
 setLightAndColor(progPhong, phongUniforms);
 setLightAndColor(progGouraud, gouraudUniforms);
 
-// Вернёмся к текущей программе
 gl.useProgram(currentProgram);
 
-// --- Загрузка OBJ и создание мешей ---
 async function loadOBJ(url) {
     const res = await fetch(url);
     const text = await res.text();
@@ -325,16 +314,15 @@ function createMesh(data) {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.indices, gl.STATIC_DRAW);
 
-    const stride = 8 * 4; // 8 компонент по 4 байта
+    const stride = 8 * 4;
 
-    // Индексы атрибутов фиксированы (0,1,2)
     gl.enableVertexAttribArray(0); // aPosition
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
 
     gl.enableVertexAttribArray(1); // aNormal
     gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * 4);
 
-    // aTexCoord может отсутствовать в некоторых программах, но VAO всё равно работает
+    // aTexCoord
     if (gl.getAttribLocation(currentProgram, "aTexCoord") >= 0) {
         gl.enableVertexAttribArray(2);
         gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 6 * 4);
@@ -380,19 +368,21 @@ async function init() {
     requestAnimationFrame(render);
 }
 
-// --- Обработка клавиш ---
 document.addEventListener("keydown", (e) => {
-    // Вращение
-    if (e.key == "w") anglex += 0.05;
-    if (e.key == "s") anglex -= 0.05;
-    if (e.key == "a") angley -= 0.05;
-    if (e.key == "d") angley += 0.05;
-
     // Переключение модели света (Lambert / Phong) и случайный цвет
+    if (e.key == "+" || e.key == "=") {
+        ambientPower += 0.02
+        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
+    }
+
+    if (e.key == "-") {
+        ambientPower -= 0.02
+        gl.uniform1f(currentUniforms.ambientPower, ambientPower);
+    }
+
     if (e.key == "l" || e.key == "L") {
         usePhongModel = 1 - usePhongModel;
         //baseColor = [Math.random(), Math.random(), Math.random()];
-        // Обновляем uniform в текущей программе
         gl.uniform1i(currentUniforms.usePhong, usePhongModel);
         gl.uniform3fv(currentUniforms.baseColor, baseColor);
         console.log("Light model:", usePhongModel ? "Phong" : "Lambert", "Color:", baseColor);
@@ -403,7 +393,6 @@ document.addEventListener("keydown", (e) => {
         currentProgram = progGouraud;
         currentUniforms = gouraudUniforms;
         gl.useProgram(currentProgram);
-        // Переустанавливаем общие uniform'ы (они могли измениться)
         gl.uniform3fv(currentUniforms.lightPos, lightPos);
         gl.uniform1f(currentUniforms.ambientPower, ambientPower);
         gl.uniform1i(currentUniforms.usePhong, usePhongModel);
@@ -429,7 +418,6 @@ function render() {
     const aspect = canvas.width / canvas.height;
     const projection = createPerspectiveMatrix(Math.PI / 4, aspect, 0.1, 100);
 
-    // Устанавливаем общие uniform'ы для текущей программы
     gl.uniformMatrix4fv(currentUniforms.projection, false, projection);
     gl.uniform3fv(currentUniforms.lightPos, lightPos);
     gl.uniform1f(currentUniforms.ambientPower, ambientPower);
