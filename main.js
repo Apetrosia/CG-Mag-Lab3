@@ -22,7 +22,7 @@ let scalex = 1;
 let scaley = 1;
 let scalez = 1;
 
-let lightPos = [5.0, 5.0, 5.0];
+let lightPos = [-1.5, -1.0, -1.0];
 let ambientPower = 0.2;
 let usePhongModel = 1;
 let baseColor = [0.96, 0.46, 0.99];
@@ -393,7 +393,8 @@ function createMesh(data) {
 let objects = [];
 
 async function init() {
-    const snowman = await loadOBJ("./models/snowman.obj");
+    const snowman = await loadOBJ("./models/snowman1.obj");
+    const cube = await loadOBJ("./models/cube.obj");
     const Sherlock = await loadOBJ("./models/Sherlock.obj");
     const bananaCat = await loadOBJ("./models/bananaCat.obj");
 
@@ -401,14 +402,22 @@ async function init() {
         mesh: createMesh(snowman),
         tx: 0,
         ty: -0.3,
-        tz: -5,
-        scale: 0.3
+        tz: -3,
+        scale: 0.4
+    });
+
+    objects.push({
+        mesh: createMesh(cube),
+        tx: -1,
+        ty: -0.3,
+        tz: -3,
+        scale: 0.4
     });
 
     objects.push({
         mesh: createMesh(Sherlock),
         tx: -1.5,
-        ty: -0.4,
+        ty: 0.4,
         tz: -4,
         scale: 3
     });
@@ -424,8 +433,14 @@ async function init() {
     requestAnimationFrame(render);
 }
 
+let isRotating = true;
+
 document.addEventListener("keydown", (e) => {
-    // Регулировка ambient (как было)
+    if (e.key == "R" || e.key == "r") {
+        isRotating = !isRotating;
+    }
+
+    // Регулировка ambient
     if (e.key == "+" || e.key == "=") {
         ambientPower = Math.min(1, ambientPower + 0.02);
         setUniforms(progPhong, phongUniforms);
@@ -518,6 +533,11 @@ function render() {
         gl.drawElements(gl.TRIANGLES, obj.mesh.count, gl.UNSIGNED_INT, 0);
     }
 
+    if (isRotating) {
+        anglex += 0.005;
+        angley += 0.005;
+        anglez += 0.005;
+    }
     requestAnimationFrame(render);
 }
 
