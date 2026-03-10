@@ -22,7 +22,7 @@ let scalex = 1;
 let scaley = 1;
 let scalez = 1;
 
-let lightPos = [-1.5, -1.0, -1.0];
+let lightPos = [-1.6, -1.0, -1.0];
 let ambientPower = 0.2;
 let usePhongModel = 1;
 let baseColor = [0.96, 0.46, 0.99];
